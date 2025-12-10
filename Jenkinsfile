@@ -1,13 +1,12 @@
 pipeline {
   agent any
+
   environment {
-    // Example: set JAVA_HOME or tool names if required
-    // JAVA_HOME = tool name if configured in Jenkins global tool config
+    // set env vars here if needed
   }
+
   options {
-    // Keep only last 10 builds
     buildDiscarder(logRotator(numToKeepStr: '10'))
-    // Timeout the whole pipeline after 60 minutes
     timeout(time: 60, unit: 'MINUTES')
   }
 
@@ -16,86 +15,72 @@ pipeline {
       steps {
         echo "Checkout source"
         checkout scm
-        // Clean workspace if you want
         deleteDir()
       }
     }
 
     stage('Parallel Work') {
-      parallel {
-        stage('Build') {
-          steps {
-            echo "Compiling / Building application..."
-            // Example build commands (adjust to your build tool)
-            // sh './gradlew clean assemble'
-            sh 'echo build-step: simulate build && sleep 3'
-            // stash the built artifacts for other stages if needed
-            stash name: 'app-artifact', includes: '**/build/libs/**', allowEmpty: true
-          }
-          post {
-            failure {
-              echo "Build failed — collecting logs"
+      steps {
+        script {
+          // Use named parallel branches. Each branch is a closure.
+          parallel(
+            BuildBranch: {
+              // Inside the branch we create a stage to preserve console grouping
+              stage('Build') {
+                steps {
+                  echo "Compiling / Building application..."
+                  sh 'echo build-step: simulate build && sleep 3'
+                  stash name: 'app-artifact', includes: '**/build/libs/**', allowEmpty: true
+                }
+                // post within a stage is not allowed under scripted closure, so we handle errors with try/catch if required.
+              }
+            },
+            UnitTestsBranch: {
+              stage('Unit Tests') {
+                steps {
+                  echo "Running unit tests..."
+                  sh 'echo running unit tests && sleep 2'
+                  // junit '**/build/test-results/test/*.xml'
+                }
+              }
+            },
+            LintBranch: {
+              stage('Lint / Static Analysis') {
+                steps {
+                  echo "Running lint/static analysis..."
+                  sh 'echo linting && sleep 2'
+                }
+              }
+            },
+            IntegrationBranch: {
+              stage('Integration Tests') {
+                steps {
+                  echo "Integration tests (may need artifact)..."
+                  // unstash will succeed even if stash was empty because allowEmpty:true was used
+                  unstash 'app-artifact'
+                  sh 'echo integration tests && sleep 4'
+                }
+              }
             }
-          }
-        }
-
-        stage('Unit Tests') {
-          steps {
-            echo "Running unit tests..."
-            // sh './gradlew test'
-            sh 'echo running unit tests && sleep 2'
-            // Example of recording results (make sure junit xmls exist)
-            // junit '**/build/test-results/test/*.xml'
-          }
-          post {
-            always {
-              echo "Unit tests finished"
-            }
-          }
-        }
-
-        stage('Lint / Static Analysis') {
-          steps {
-            echo "Running lint/static analysis..."
-            // sh 'npm run lint' or 'flake8 .' etc.
-            sh 'echo linting && sleep 2'
-          }
-        }
-
-        stage('Integration Tests') {
-          steps {
-            // If integration needs built artifact, unstash it
-            echo "Integration tests (may need artifact)..."
-            unstash 'app-artifact' // will be empty if none
-            sh 'echo integration tests && sleep 4'
-          }
-        }
-      } // end parallel
-    } // end stage Parallel Work
+          ) // end parallel
+        } // end script
+      } // end steps
+    } // end Parallel Work
 
     stage('Post-processing') {
       steps {
         echo "Archive artifacts and publish reports"
-        // Example archive (adjust glob)
-        // archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true
-        // junit 'build/test-results/**/*.xml'
         sh 'echo archiving artifacts'
       }
     }
   } // end stages
 
   post {
-    success {
-      echo "Pipeline succeeded"
-    }
-    failure {
-      echo "Pipeline failed — send notification (example)"
-      // mail to: 'dev-team@example.com', subject: "Build failed", body: "..."
-    }
+    success { echo "Pipeline succeeded" }
+    failure { echo "Pipeline failed — send notification (example)" }
     always {
       echo "Cleaning workspace"
       cleanWs()
     }
   }
 }
-
